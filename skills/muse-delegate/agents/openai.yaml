@@ -1,0 +1,6 @@
+interface:
+  display_name: "Muse Delegate"
+  short_description: "Delegate bounded coding work to Meta Muse"
+  default_prompt: "Use $muse-delegate for a bounded coding task and review its result."
+policy:
+  allow_implicit_invocation: true

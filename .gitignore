@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
+dist/
+work/
+*.log
+.env*
+settings.json
+auth.json
+credentials.json

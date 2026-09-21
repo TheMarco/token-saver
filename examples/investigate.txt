@@ -1,0 +1,5 @@
+Read-only investigation: locate the code responsible for [specific behavior].
+Start with these candidate paths: [relevant files/directories].
+Report the execution path and exact source locations, any uncertain assumptions,
+and the smallest next verification step. Do not edit or run tests.
+Keep the answer below 300 words. Do not delegate.

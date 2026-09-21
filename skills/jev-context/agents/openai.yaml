@@ -1,0 +1,6 @@
+interface:
+  display_name: "Jev Context"
+  short_description: "Select compact, traceable local code excerpts"
+  default_prompt: "Use $jev-context to select relevant excerpts before a broad repository read."
+policy:
+  allow_implicit_invocation: true

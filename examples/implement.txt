@@ -1,0 +1,9 @@
+Implement [specific bounded change] in [owned files] only.
+Acceptance criteria: [observable expected behavior and edge cases].
+Relevant existing patterns: [file paths].
+Run [appropriate verification command]. Preserve unrelated changes and files.
+Reuse existing coverage; add regression tests only for meaningful gaps.
+Rerun passing checks only for relevant changes or required gates.
+Do not commit, push, deploy, or delegate. If blocked, report the blocker.
+Return changed paths, behavior, checks, failures, and remaining uncertainty
+in under 300 words. The supervising Codex agent will review and integrate.
