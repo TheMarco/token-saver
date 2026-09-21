@@ -23,6 +23,34 @@ def review(attempt="one", decision="accepted"):
 
 
 class LedgerTests(unittest.TestCase):
+    def test_new_attempt_invalidates_measurement_until_refreshed(self):
+        measurement = {"type": "primary_usage", "task_id": "task", "total_tokens": 100,
+                       "evidence": "Whole-task measurement after first review"}
+        events = [execution(total=10), review(), measurement]
+        # Importing the same attempt again does not invalidate a measurement.
+        events.append(execution(total=10))
+        self.assertEqual(ledger.summarize_events(events)["primary_tokens_per_accepted_task"], 100)
+        events += [execution("two", total=20), review("two")]
+        result = ledger.summarize_events(events)
+        row = result["tasks"][0]
+        self.assertIsNone(row["primary_tokens"])
+        self.assertEqual(row["primary_measurement_status"], "stale")
+        self.assertEqual(row["primary_measurement"], {"total_tokens": 100, "covered_attempt_ids": ["one"]})
+        self.assertEqual(result["primary_unmeasured_tasks"], 1)
+        self.assertIsNone(result["primary_tokens_per_accepted_task"])
+        self.assertIsNone(result["total_cross_provider_tokens"])
+        events.append({**measurement, "total_tokens": 150})
+        result = ledger.summarize_events(events)
+        self.assertEqual(result["primary_tokens_per_accepted_task"], 150)
+        self.assertEqual(result["total_cross_provider_tokens"], 180)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ledger.jsonl"
+            for event in events:
+                ledger.append_event(path, event)
+            saved = json.loads(path.read_text().splitlines()[-1])
+            self.assertEqual(saved["covered_attempt_ids"], ["one", "two"])
+            self.assertEqual(ledger.summarize(path), result)
+
     def test_missing_usage_and_completed_are_not_zero_or_accepted(self):
         result = ledger.summarize_events([execution()])
         self.assertEqual(result["accepted_tasks"], 0)

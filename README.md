@@ -1,10 +1,12 @@
-# Token Saver 0.3.0
+# Token Saver 0.3.1
 
 Token Saver helps Codex spend less context and effort on avoidable work. It selects relevant source excerpts before broad reads and delegates bounded coding tasks to your installed Meta Muse CLI, while Codex keeps the decisions and final review.
 
 It installs two skills and a reversible instruction block—not a background service or a replacement for Codex's model. You can start entirely locally, add Muse, and enable the Jev API independently.
 
 New in 0.3: optional per-turn Muse model/effort overrides, requested-versus-observed configuration, Git scope evidence, workspace/session locks, and a local acceptance/usage ledger. Unknown measurements stay unknown. See [configuration and evidence setup](docs/EVIDENCE.md) for commands and limitations.
+
+0.3.1 hardens termination cleanup, marks primary measurements stale after new attempts, and caps the whole stdout result rather than only its answer. Full evidence remains on disk; abrupt SIGKILL protection is not claimed.
 
 [Install](#install) · [Muse setup](#set-up-muse) · [Jev setup](#set-up-jev-optional) · [Check your setup](#first-run-checks) · [Everyday use](#everyday-use) · [Troubleshooting](#troubleshooting)
 
@@ -50,7 +52,7 @@ Check your prerequisites with `python3 --version`, `git --version`, and `rg --ve
 Start from the already-downloaded or extracted package directory. All installer commands below use that directory as the working directory.
 
 ```sh
-cd /path/to/token-saver-0.3.0
+cd /path/to/token-saver-0.3.1
 python3 install.py install --dry-run
 python3 install.py install
 ```
@@ -81,7 +83,7 @@ python3 install.py doctor
 python3 "$token_saver_home/skills/jev-context/scripts/context_filter.py" doctor
 ```
 
-Expect JSON showing your Python version, Codex home, `muse`/`git` paths, installed version `0.3.0`, and selected options. After install, always use the installed Jev helper path for credential checks, not the package copy: private settings live beside the installed skill. With a custom home, substitute its `skills/jev-context/scripts/context_filter.py`.
+Expect JSON showing your Python version, Codex home, `muse`/`git` paths, installed version `0.3.1`, and selected options. After install, always use the installed Jev helper path for credential checks, not the package copy: private settings live beside the installed skill. With a custom home, substitute its `skills/jev-context/scripts/context_filter.py`.
 
 The installer records the original contents of any replaced skill files in `token-saver/state.json` inside the Codex home. It never copies this package's local environment and never touches private `settings.json` files, login state, or API keys. Keep that state file until uninstall if you need the originals restored.
 
@@ -179,7 +181,7 @@ python3 "$token_saver_home/skills/muse-delegate/scripts/muse_worker.py" \
   --workspace "$PWD" --prompt-file work/muse-check.txt --max-steps 4
 ```
 
-Expect status `completed` and the correct version `0.3.0`.
+Expect status `completed` and the correct version `0.3.1`.
 
 Installer flags guide automatic agent behavior; they do not block direct helper commands. Running a command with `--backend jev` or starting a Muse job explicitly invokes that provider regardless of the installer's opt-in state.
 
@@ -267,6 +269,6 @@ See [PRIVACY.md](docs/PRIVACY.md) for data flow and log details.
 
 ## Build a shareable archive
 
-From the package directory, run `python3 scripts/build_release.py`. It produces `dist/token-saver-0.3.0.zip` and prints its SHA-256 checksum. The explicit allowlist excludes credentials, private settings, logs, caches, and Git history. Prefer sharing that ZIP over an unreviewed working folder. Contributors can run the offline suite with `python3 -m unittest discover -s tests -v`; end users do not need to run it to install.
+From the package directory, run `python3 scripts/build_release.py`. It produces `dist/token-saver-0.3.1.zip` and prints its SHA-256 checksum. The explicit allowlist excludes credentials, private settings, logs, caches, and Git history. Prefer sharing that ZIP over an unreviewed working folder. Contributors can run the offline suite with `python3 -m unittest discover -s tests -v`; end users do not need to run it to install.
 
 Released under the [MIT license](LICENSE). Not affiliated with OpenAI, Meta, or TypeSafe. Provider CLIs and services are not bundled.

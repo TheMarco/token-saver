@@ -249,16 +249,16 @@ class TestMuseWorkerExtract(OfflineTestCase):
         self.assertEqual(result["answer"], "")
 
     def test_extract_truncates_long_answer(self):
-        records = _muse_records(answer="x" * 200)
+        records = _muse_records(answer="x" * 2000)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "events.jsonl"
             _write_live_jsonl(path, records)
-            code, result = _run_muse_extract(path, max_chars=50)
+            code, result = _run_muse_extract(path, max_chars=1000)
         self.assertEqual(code, 0)
         self.assertTrue(result["answer_truncated"])
         self.assertIn("result_file", result)
         full = Path(result["result_file"]).read_text(encoding="utf-8")
-        self.assertEqual(full, "x" * 200)
+        self.assertEqual(full, "x" * 2000)
         self.addCleanup(shutil.rmtree, Path(result['result_file']).parent)
 
 

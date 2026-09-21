@@ -24,7 +24,7 @@ Each job saves `handoff.json`. `execution_status` (and legacy `status`) describe
 
 Snapshots compare dirty-file contents, modes, and index state. Unchanged pre-existing edits are not attributed to Muse; renames include both paths. Ignored files, temporary edits restored before capture, external effects, and shared Git metadata are not fully audited. Scope checks are review aids, not a sandbox or proof of authorship. Inspect `review_flags`, actual diffs, and appropriate checks before accepting.
 
-Nonblocking locks cover the canonical workspace and session, including resume preflight and evidence capture. They coordinate Token Saver jobs, not editors or direct Muse invocations. Locks release on process exit; their files remain to avoid inode races. Do not delete active locks. macOS/Linux only.
+Nonblocking locks cover the canonical workspace and session, including resume preflight and evidence capture. They coordinate Token Saver jobs, not editors or direct Muse invocations. SIGTERM, SIGINT, and SIGHUP trigger worker process-group cleanup while locks remain held; a worker that ignores termination is killed after a short grace period. Repeated termination signals do not bypass cleanup. Lock files remain to avoid inode races; do not delete active locks. Abrupt SIGKILL or a wrapper crash can still leave an orphan worker after locks release: inspect and stop the worker before retrying. Detached processes outside the worker's group are not covered. macOS/Linux only.
 
 ## Local ledger
 
@@ -62,7 +62,7 @@ python3 skills/muse-delegate/scripts/task_ledger.py summary \
   --ledger /absolute/private/example.ledger.jsonl
 ```
 
-The number is illustrative. Omit `--total-tokens` when unavailable. Latest primary measurement replaces earlier ones. Token Saver does not scrape Codex transcripts or infer usage from characters, account percentages, or elapsed time.
+The number is illustrative. Omit `--total-tokens` when unavailable. A primary measurement records the attempt IDs covered at that point. A later unique execution makes it stale: `primary_tokens`, complete averages, and complete cross-provider totals become null until a refreshed whole-task measurement covers all attempts. Duplicate imports do not invalidate coverage. The summary retains the previous measurement and covered IDs with `primary_measurement_status: "stale"`; the append-only ledger preserves history. Legacy measurements without coverage IDs are interpreted against attempts preceding them in ledger order. Token Saver does not scrape Codex transcripts or infer usage from characters, account percentages, or elapsed time.
 
 Muse usage comes from an offline export, filtered to the current run and deduplicated by source record ID. Reasoning tokens are not added again to output. Because cache conventions vary, combined totals are derived only when every reported completion explicitly has zero cache counters. Otherwise totals remain unknown while raw counters are retained.
 

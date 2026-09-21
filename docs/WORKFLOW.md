@@ -39,7 +39,7 @@ python3 skills/muse-delegate/scripts/muse_worker.py \
 
 The helper requests per-run workspace trust so Muse loads project rules. It does not persist trust or disable sandboxing. For private/non-Git files where worktree isolation is unavailable, use read-only recommendations and have the primary agent edit.
 
-The default budget is 24 model steps and 600 seconds. Set `--max-steps` or `--timeout` for a task that needs different limits. `--max-output-chars` bounds the returned answer; open `result_file` if `answer_truncated` is true. Process exit success means Muse completed a response, not that its claims or code are correct.
+The default budget is 24 model steps and 600 seconds. Set `--max-steps` or `--timeout` for a task that needs different limits. `--max-output-chars` bounds the entire stdout JSON, including its newline (minimum 3 characters). Large results return selected status fields, change counts, and a `handoff_file` pointer when space permits; full evidence stays on disk. If even the pointer cannot fit, stderr reports its path. Stderr diagnostics are separate from this stdout budget. Open the handoff when `output_truncated` is true; tiny budgets may omit even that flag. Process exit success means Muse completed a response, not that its claims or code are correct.
 
 Each job prints the temporary log directory and returns JSON with the answer, completion state, session ID, model, and retained output paths. Read only the final result normally. Recover output without another model call:
 

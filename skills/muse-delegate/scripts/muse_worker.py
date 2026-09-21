@@ -129,14 +129,73 @@ def linked_worktree(workspace):
 
 
 def compact(result, limit):
+    """Bound the entire stdout JSON, including its newline, without losing evidence."""
+    if limit < 3:
+        raise ValueError("output limit must be at least 3 characters for JSON and newline")
+    def encode(value):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n"
+    full = {**result, "answer_truncated": False, "output_truncated": False}
+    if len(encode(full)) <= limit:
+        sys.stdout.write(encode(full))
+        return
+    handoff = result.get("handoff_file")
+    if not handoff or not Path(handoff).is_file():
+        handoff = str(Path(tempfile.mkdtemp(prefix="muse-result-")) / "handoff.json")
+        full["handoff_file"] = handoff
+        Path(handoff).write_text(json.dumps(full, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        Path(handoff).chmod(0o600)
     answer = result.get("answer", "")
-    result["answer_truncated"] = len(answer) > limit
-    if result["answer_truncated"]:
-        result["answer"] = answer[:limit] + "\n[Read result.txt for the complete answer.]"
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    displayed = {}
+    def include(key, value):
+        candidate = {**displayed, key: value}
+        if len(encode(candidate)) <= limit:
+            displayed[key] = value
+    include("answer_truncated", bool(answer))
+    include("handoff_file", handoff)
+    include("output_truncated", True)
+    for key in ("execution_status", "acceptance_status", "status", "terminal", "exit_code",
+                "review_flags", "ledger_error", "reason", "result_file"):
+        if key in result:
+            include(key, result[key])
+    changes = result.get("changes", {})
+    include("change_counts", {key: len(value) for key, value in changes.items() if isinstance(value, list)})
+    # JSON escaping matters: slicing the rendered JSON would make it invalid.
+    low, high = 0, len(answer)
+    while low < high:
+        mid = (low + high + 1) // 2
+        candidate = {**displayed, "answer": answer[:mid], "answer_truncated": mid < len(answer)}
+        if len(encode(candidate)) <= limit:
+            low = mid
+        else:
+            high = mid - 1
+    if low:
+        displayed.update(answer=answer[:low], answer_truncated=low < len(answer))
+    if "handoff_file" not in displayed:
+        print(f"Full result: {handoff}", file=sys.stderr)
+    sys.stdout.write(encode(displayed))
 
 
-def run(locks):
+class WorkerTerminated(BaseException):
+    pass
+
+
+def stop_worker(process):
+    """Keep locks held until the worker is reaped; kill remaining group members too."""
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=2)
+        reaped = True
+    except subprocess.TimeoutExpired:
+        reaped = False
+    # The group leader may exit while descendants ignore TERM.
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+    if not reaped:
+        process.wait()
+
+
+def run(locks, termination):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path)
     parser.add_argument("--prompt-file", type=Path)
@@ -144,7 +203,7 @@ def run(locks):
     parser.add_argument("--resume", type=Path, help="Prior job directory with session.json; same workspace and mode only")
     parser.add_argument("--max-steps", type=int, default=24)
     parser.add_argument("--timeout", type=int, default=600)
-    parser.add_argument("--max-output-chars", type=int, default=8000)
+    parser.add_argument("--max-output-chars", type=int, default=8000, help="Entire stdout JSON budget, including newline (minimum 3); full evidence stays on disk")
     parser.add_argument("--extract", type=Path, help="Recover an existing JSONL log or Muse export offline")
     parser.add_argument("--model", help="Per-turn model override; does not change defaults")
     parser.add_argument("--reasoning-effort", choices=["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
@@ -154,6 +213,8 @@ def run(locks):
     args = parser.parse_args()
     if min(args.max_steps, args.timeout, args.max_output_chars) <= 0:
         parser.error("limits must be positive")
+    if args.max_output_chars < 3:
+        parser.error("--max-output-chars must be at least 3")
     try:
         args.allow_path = allowed_paths(args.allow_path)
     except ValueError as exc:
@@ -270,6 +331,8 @@ def run(locks):
     print(f"Muse job {session_id}; logs: {run_dir}", file=sys.stderr, flush=True)
     interruption = None
     with events_path.open("w") as events, stderr_path.open("w") as errors:
+        if termination["signal"]:
+            return 128 + termination["signal"]
         try:
             process = subprocess.Popen(command, cwd=workspace, stdin=subprocess.DEVNULL,
                                        stdout=events, stderr=errors, start_new_session=True)
@@ -278,18 +341,19 @@ def run(locks):
             code, interruption = 127, "launch_failed"
         else:
             try:
-                code = process.wait(timeout=args.timeout)
-            except (subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
-                interruption = "timeout" if isinstance(exc, subprocess.TimeoutExpired) else "interrupted"
-                with suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGTERM)
                 try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    with suppress(ProcessLookupError):
-                        os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
-                code = 124 if interruption == "timeout" else 130
+                    # During launch/cleanup the handler only records the signal,
+                    # preventing a spawn race or repeated signals skipping cleanup.
+                    termination["waiting"] = True
+                    if termination["signal"]:
+                        raise WorkerTerminated()
+                    code = process.wait(timeout=args.timeout)
+                finally:
+                    termination["waiting"] = False
+            except (subprocess.TimeoutExpired, KeyboardInterrupt, WorkerTerminated) as exc:
+                interruption = "timeout" if isinstance(exc, subprocess.TimeoutExpired) else "interrupted"
+                stop_worker(process)
+                code = 124 if interruption == "timeout" else 128 + (termination["signal"] or signal.SIGINT)
     run_id = latest_run_id(events_path)
     result = extract(events_path, run_id=run_id)
     # Export is offline. Recover from CLI event format differences without another model call.
@@ -367,7 +431,15 @@ def run(locks):
 
 def main():
     with ExitStack() as locks:
-        return run(locks)
+        termination = {"signal": None, "waiting": False}
+        def on_signal(signum, frame):
+            termination["signal"] = termination["signal"] or signum
+            if termination["waiting"]:
+                raise WorkerTerminated()
+        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            previous = signal.signal(signum, on_signal)
+            locks.callback(signal.signal, signum, previous)
+        return run(locks, termination)
 
 
 if __name__ == "__main__":

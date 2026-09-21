@@ -20,7 +20,7 @@ def summarize_events(events):
     for event in events:
         if not isinstance(event, dict) or not isinstance(event.get("task_id"), str) or not event["task_id"].strip():
             raise ValueError("each event needs a nonempty task_id")
-        task = tasks.setdefault(event["task_id"], {"attempts": {}, "reviews": {}, "primary_tokens": None})
+        task = tasks.setdefault(event["task_id"], {"attempts": {}, "reviews": {}, "primary_measurement": None})
         kind = event.get("type")
         if kind in ("execution", "review"):
             attempt = event.get("attempt_id")
@@ -45,7 +45,12 @@ def summarize_events(events):
             if not isinstance(event.get("evidence"), str) or not event["evidence"].strip():
                 raise ValueError("review/measurement needs evidence")
             if kind == "primary_usage":
-                task["primary_tokens"] = tokens(event.get("total_tokens"))
+                covered = event.get("covered_attempt_ids", list(task["attempts"]))
+                if (not isinstance(covered, list) or any(not isinstance(item, str) for item in covered) or
+                        len(set(covered)) != len(covered) or not set(covered).issubset(task["attempts"])):
+                    raise ValueError("covered_attempt_ids must be unique known attempts for this task")
+                task["primary_measurement"] = {"total_tokens": tokens(event.get("total_tokens")),
+                                                "covered_attempt_ids": covered}
                 continue
             decision = event.get("decision")
             execution = task["attempts"].get(attempt)
@@ -60,11 +65,16 @@ def summarize_events(events):
     for identifier, task in tasks.items():
         attempts = list(task["attempts"].values())
         totals = [a["muse_usage"].get("total_tokens") for a in attempts]
+        measurement = task["primary_measurement"]
+        stale = measurement is not None and set(measurement["covered_attempt_ids"]) != set(task["attempts"])
+        primary_tokens = measurement["total_tokens"] if measurement and not stale else None
         rows.append({"task_id": identifier, "attempts": len(attempts),
             "additional_attempts": max(len(attempts) - 1, 0),
             "elapsed_seconds": sum(a["elapsed_seconds"] for a in attempts),
             "acceptance_status": task["reviews"].get(attempts[-1]["attempt_id"], "unreviewed") if attempts else "unreviewed",
-            "primary_tokens": task["primary_tokens"],
+            "primary_tokens": primary_tokens,
+            "primary_measurement": measurement,
+            "primary_measurement_status": "stale" if stale else "current" if primary_tokens is not None else "unavailable",
             "muse_tokens": sum(totals) if totals and all(v is not None for v in totals) else None,
             "muse_known_tokens": sum(v for v in totals if v is not None),
             "muse_unmeasured_attempts": sum(v is None for v in totals)})
@@ -98,6 +108,10 @@ def append_event(path, event):
         fcntl.flock(stream, fcntl.LOCK_EX)
         os.fchmod(stream.fileno(), 0o600)
         events = _read(stream)
+        if event.get("type") == "primary_usage" and "covered_attempt_ids" not in event:
+            event = {**event, "covered_attempt_ids": list(dict.fromkeys(
+                item["attempt_id"] for item in events
+                if item.get("type") == "execution" and item.get("task_id") == event.get("task_id")))}
         summarize_events([*events, event])  # Validate under the same lock as append.
         if event.get("type") == "execution" and event in events:
             return

@@ -1,10 +1,14 @@
 """Offline checks of actual locks, Git scope evidence, and configuration parsing."""
 import json
+import contextlib
+import io
 import os
 from pathlib import Path
 import subprocess
+import signal
 import sys
 import tempfile
+import time
 import unittest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills/muse-delegate/scripts"
@@ -14,6 +18,91 @@ import muse_worker
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_entire_display_budget_preserves_full_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            handoff = Path(tmp) / "handoff.json"
+            result = {"answer": 'done "\\\n☃' * 1000,
+                      "reason": "large failure" * 1000,
+                      "changes": {"changed_files": [f"src/file_{i:05d}.py" for i in range(2000)]},
+                      "handoff_file": str(handoff)}
+            handoff.write_text(json.dumps(result))
+            for limit in (3, 50, 100, 512, 8000):
+                with self.subTest(limit=limit):
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+                        muse_worker.compact(result, limit)
+                    self.assertLessEqual(len(output.getvalue()), limit)
+                    shown = json.loads(output.getvalue())
+                    if limit >= 512:
+                        self.assertEqual(shown["handoff_file"], str(handoff))
+                        self.assertEqual(shown["change_counts"]["changed_files"], 2000)
+                    self.assertEqual(json.loads(handoff.read_text()), result)
+
+    def test_sigterm_cleans_worker_before_releasing_lock(self):
+        # Adapted from the user's offline reproduction; no provider calls.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            bindir = base / "bin"
+            bindir.mkdir()
+            pidfile, ready = base / "pid", base / "ready"
+            terminated = base / "terminated"
+            fake = bindir / "muse"
+            fake.write_text(f'''#!{sys.executable}
+import os, signal, sys, time
+from pathlib import Path
+if sys.argv[1] != "exec":
+    sys.exit(1)
+def ignore_term(signum, frame):
+    Path({str(terminated)!r}).touch()
+signal.signal(signal.SIGTERM, ignore_term)
+Path({str(pidfile)!r}).write_text(str(os.getpid()))
+Path({str(ready)!r}).touch()
+while True: time.sleep(0.05)
+''')
+            fake.chmod(0o700)
+            prompt = base / "prompt"
+            prompt.write_text("Offline fake-worker fixture.")
+            env = {**os.environ, "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+            wrapper = subprocess.Popen([sys.executable, str(SCRIPTS / "muse_worker.py"),
+                "--workspace", str(base), "--prompt-file", str(prompt), "--timeout", "20"],
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+            child = None
+            try:
+                deadline = time.monotonic() + 8
+                while not ready.exists():
+                    self.assertIsNone(wrapper.poll(), "wrapper exited before worker started")
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(0.02)
+                child = int(pidfile.read_text())
+                with self.assertRaises(ValueError):
+                    with evidence.job_lock(base, "other-session"):
+                        pass
+                wrapper.terminate()
+                deadline = time.monotonic() + 1
+                while not terminated.exists():
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(0.02)
+                # Ignored SIGTERM leaves it alive during cleanup; lock stays held.
+                os.kill(child, 0)
+                with self.assertRaises(ValueError):
+                    with evidence.job_lock(base, "other-session"):
+                        pass
+                wrapper.terminate()  # A second signal must not bypass cleanup.
+                stdout, stderr = wrapper.communicate(timeout=8)
+                self.assertEqual(wrapper.returncode, 128 + signal.SIGTERM, stderr)
+                self.assertEqual(json.loads(stdout)["execution_status"], "failed")
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(child, 0)
+                with evidence.job_lock(base, "other-session"):
+                    pass
+            finally:
+                if wrapper.poll() is None:
+                    wrapper.kill()
+                if child is not None:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(child, signal.SIGKILL)
+                wrapper.communicate(timeout=5)
+
     def test_configuration_unknown_and_mismatch(self):
         self.assertIsNone(evidence.configuration({"model": None, "reasoning_effort": None}, {})["matches_requested"])
         result = evidence.configuration({"model": "requested", "reasoning_effort": "max"}, {"model": "different"})
