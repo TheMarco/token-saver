@@ -15,10 +15,14 @@ ROOT = Path(__file__).resolve().parent
 START = '<!-- token-saver:start -->'
 END = '<!-- token-saver:end -->'
 STATE = 'token-saver/state.json'
-SKILL_FILES = tuple(
+LEGACY_SKILL_FILES = tuple(
     f'skills/{name}/{suffix}'
     for name, helper in [('muse-delegate', 'muse_worker.py'), ('jev-context', 'context_filter.py')]
     for suffix in ['SKILL.md', 'agents/openai.yaml', f'scripts/{helper}']
+)
+SKILL_FILES = LEGACY_SKILL_FILES + (
+    'skills/muse-delegate/scripts/muse_evidence.py',
+    'skills/muse-delegate/scripts/task_ledger.py',
 )
 
 
@@ -118,7 +122,7 @@ def load_state(home):
     if not path.exists():
         return None
     state = json.loads(path.read_text(encoding='utf-8'))
-    if state.get('schema') != 1 or set(state.get('files', {})) != set(SKILL_FILES):
+    if state.get('schema') != 1 or set(state.get('files', {})) not in (set(SKILL_FILES), set(LEGACY_SKILL_FILES)):
         raise ValueError('Unrecognized install state; preserve state.json and inspect it before proceeding.')
     return state
 
@@ -149,7 +153,7 @@ def install(home, muse=None, jev=None, dry_run=False):
     for relative in SKILL_FILES:
         destination = guarded(home, relative)
         old, new = current(destination), (ROOT / relative).read_bytes()
-        old_entry = previous['files'][relative] if previous else None
+        old_entry = previous['files'].get(relative) if previous else None
         if old_entry and sha(old) not in (old_entry['installed_sha256'], sha(new), None):
             raise ValueError(f'Locally modified installed file; preserve or restore it first: {destination}')
         state['files'][relative] = {

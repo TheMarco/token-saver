@@ -23,6 +23,10 @@ Do not increase delegation just to maximize the number of agents. A small local 
 
 ## Measure a small sample
 
+Prefer **primary-model tokens per accepted task**, including planning, corrections, and review, while tracking provider usage separately. The optional [local ledger](EVIDENCE.md#local-ledger) records Muse attempts and explicit acceptance decisions. It reports an all-accepted-task average only when primary measurements cover every accepted task; a separate measured-subset average reports its coverage. Do not compare that subset as though it represented all tasks.
+
+The ledger does not automatically measure primary usage, merge Jev metrics, or account for unreported Muse background calls. Keep missing measurements unknown. Use the manual scorecard below for primary-only baselines, review time, and context misses that the ledger does not collect.
+
 Reusable materials: [task brief](../templates/TASK_BRIEF.md), [handoff](../templates/HANDOFF.md), [project map](../templates/PROJECT_MAP.md), [testing policy](TESTING.md), and [skill/plugin audit](SKILL_AUDIT.md). Use them when useful, not as mandatory paperwork for tiny tasks.
 
 For the next five to ten comparable tasks, record:

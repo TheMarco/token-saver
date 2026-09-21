@@ -9,3 +9,4 @@ work/
 settings.json
 auth.json
 credentials.json
+*.ledger.jsonl

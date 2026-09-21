@@ -52,6 +52,16 @@ class InstallerTests(unittest.TestCase):
         installer.uninstall(self.home)
         self.assertEqual(self.snapshot(), {})
 
+    def test_upgrade_legacy_install_preserves_original_new_helper(self):
+        original = self.write('skills/muse-delegate/scripts/task_ledger.py', 'personal helper')
+        with patch.object(installer, 'SKILL_FILES', installer.LEGACY_SKILL_FILES):
+            installer.install(self.home, muse=True)
+        installer.install(self.home)
+        self.assertTrue(installer.load_state(self.home)['options']['muse'])
+        self.assertNotEqual(original.read_text(), 'personal helper')
+        installer.uninstall(self.home)
+        self.assertEqual(original.read_text(), 'personal helper')
+
     def test_restore_original_files_and_keep_private_settings(self):
         original = '# My instructions\r\nKeep replies short.'
         self.write('AGENTS.md', original)

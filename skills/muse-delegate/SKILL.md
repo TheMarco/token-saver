@@ -27,6 +27,14 @@ The runner uses the existing Muse login/model, permits 24 model steps, and times
 
 ## Accept results
 
+Optional `--model` and `--reasoning-effort` override a turn without changing defaults. Repeat on resume if required. Inspect `configuration.requested`, `observed`, and `matches`; unknown observations stay null. CLI version is separate from model identity. Never infer effective effort from a requested flag.
+
+For edit jobs, pass repeated `--allow-path` values matching owned files (or directories ending in `/`). The handoff records revisions, pre-existing and changed/untracked paths, and scope violations. Omitted scope is unverified. Snapshots do not audit ignored files, restored intermediate edits, or external effects. Workspace/session locks prevent overlapping wrapper jobs, not external tools.
+
+`execution_status` and legacy `status` mean CLI completion, not passing tests or acceptance. `acceptance_status` starts unreviewed, `checks` stays null. Inspect `review_flags`, actual diffs, and proportionate checks before integration.
+
+Optional `--task-id` and `--ledger /private/task.ledger.jsonl` record usage/time locally. Keep the same ledger/task ID for follow-ups. Use `scripts/task_ledger.py --help` for offline import, review, primary-usage recording, and summaries. Record acceptance only after review with evidence. Primary usage requires an actual whole-task measurement; otherwise leave it unknown. Muse totals cover reported foreground calls, not all account usage. Do not derive savings percentages from this partial record.
+
 For a follow-up on the same assignment, reuse the retained job directory:
 
 ```sh

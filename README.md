@@ -1,8 +1,10 @@
-# Token Saver 0.2.0
+# Token Saver 0.3.0
 
 Token Saver helps Codex spend less context and effort on avoidable work. It selects relevant source excerpts before broad reads and delegates bounded coding tasks to your installed Meta Muse CLI, while Codex keeps the decisions and final review.
 
 It installs two skills and a reversible instruction block—not a background service or a replacement for Codex's model. You can start entirely locally, add Muse, and enable the Jev API independently.
+
+New in 0.3: optional per-turn Muse model/effort overrides, requested-versus-observed configuration, Git scope evidence, workspace/session locks, and a local acceptance/usage ledger. Unknown measurements stay unknown. See [configuration and evidence setup](docs/EVIDENCE.md) for commands and limitations.
 
 [Install](#install) · [Muse setup](#set-up-muse) · [Jev setup](#set-up-jev-optional) · [Check your setup](#first-run-checks) · [Everyday use](#everyday-use) · [Troubleshooting](#troubleshooting)
 
@@ -48,7 +50,7 @@ Check your prerequisites with `python3 --version`, `git --version`, and `rg --ve
 Start from the already-downloaded or extracted package directory. All installer commands below use that directory as the working directory.
 
 ```sh
-cd /path/to/token-saver-0.2.0
+cd /path/to/token-saver-0.3.0
 python3 install.py install --dry-run
 python3 install.py install
 ```
@@ -79,7 +81,7 @@ python3 install.py doctor
 python3 "$token_saver_home/skills/jev-context/scripts/context_filter.py" doctor
 ```
 
-Expect JSON showing your Python version, Codex home, `muse`/`git` paths, installed version `0.2.0`, and selected options. After install, always use the installed Jev helper path for credential checks, not the package copy: private settings live beside the installed skill. With a custom home, substitute its `skills/jev-context/scripts/context_filter.py`.
+Expect JSON showing your Python version, Codex home, `muse`/`git` paths, installed version `0.3.0`, and selected options. After install, always use the installed Jev helper path for credential checks, not the package copy: private settings live beside the installed skill. With a custom home, substitute its `skills/jev-context/scripts/context_filter.py`.
 
 The installer records the original contents of any replaced skill files in `token-saver/state.json` inside the Codex home. It never copies this package's local environment and never touches private `settings.json` files, login state, or API keys. Keep that state file until uninstall if you need the originals restored.
 
@@ -177,7 +179,7 @@ python3 "$token_saver_home/skills/muse-delegate/scripts/muse_worker.py" \
   --workspace "$PWD" --prompt-file work/muse-check.txt --max-steps 4
 ```
 
-Expect status `completed` and the correct version `0.2.0`.
+Expect status `completed` and the correct version `0.3.0`.
 
 Installer flags guide automatic agent behavior; they do not block direct helper commands. Running a command with `--backend jev` or starting a Muse job explicitly invokes that provider regardless of the installer's opt-in state.
 
@@ -190,6 +192,8 @@ Start a new Codex task in your project and ask for work normally. The installed 
 > Use jev-context to select relevant excerpts from these logs. Start locally and retain references to omitted content.
 
 You can also name `$muse-delegate` or `$jev-context`. A focused file lookup usually needs neither. Once a task is genuinely complete, the instructions do not ask the agent to invent extra tests or improvements.
+
+For measurable delegation, give edit jobs explicit allowed paths and use a stable task ID with an optional local ledger. Review the saved handoff before recording acceptance. Model/effort overrides are optional and apply per turn; installing this package does not select a particular Muse model or maximum effort. [Configuration, scope checks, and ledger commands](docs/EVIDENCE.md) show the complete workflow. Primary-model usage must come from an actual measurement; this is not an automatic Codex token meter.
 
 ## How work flows, and its limits
 
@@ -205,6 +209,9 @@ You can also name `$muse-delegate` or `$jev-context`. A focused file lookup usua
 - Skills missing after install: start a new task or session, and check `CODEX_HOME` or the `--codex-home` target. The installed global block lists absolute skill paths.
 - Global behavior overridden: inspect project `AGENTS.md` and `AGENTS.override.md`. Global defaults do not erase project policy.
 - `muse` missing: check its PATH in Codex's terminal, not only your regular terminal; restart the app after installation. Authentication failures need Muse's login flow, not a sandbox bypass.
+- Workspace/session already active: wait for the owning wrapper job to finish or stop it normally. Do not delete active lock files to force another run.
+- Model/effort or usage shows `null`: the run did not provide enough evidence. A requested setting is not an observed setting, and unknown usage is not zero.
+- Ledger write failed: inspect `ledger_error` and preserve `handoff_file`. The wrapper returns nonzero even if `execution_status` is `completed`; repair the ledger/path, then import the handoff offline instead of rerunning Muse.
 - Jev key found in a shell but not Codex: desktop apps may not inherit shell exports. Use the installed skill's `settings.json` with an absolute key-file path.
 - Jev falls back to local ranking: inspect `metrics.fallback` and `metrics.jev.errors`, then check the key path, permissions, account access, and connectivity. A successful process exit alone does not establish API success.
 - Installer stops on a conflict: a managed file or the managed block was edited. Save those changes outside the managed files or markers, reconcile them, then re-run. Never delete `token-saver/state.json` while installed: it is both the ownership record and the backup of replaced files.
@@ -212,6 +219,16 @@ You can also name `$muse-delegate` or `$jev-context`. A focused file lookup usua
 ## Updates and uninstall
 
 Run the installer from a newer copy of the package to update. Unspecified provider preferences are preserved, and it stops if a managed file was edited so you can save those changes first. Unrelated files in skill directories remain untouched.
+
+For a managed 0.2 installation, run these commands from the 0.3 package (add your original `--codex-home` if custom):
+
+```sh
+python3 install.py install --dry-run
+python3 install.py install
+python3 install.py doctor
+```
+
+This adds the evidence/ledger helpers without changing provider opt-ins or model defaults. Pulling the repository alone does not update installed skills. Keep the install state for safe upgrades and restoration.
 
 Disable automatic provider requests without uninstalling:
 
@@ -242,6 +259,7 @@ See [PRIVACY.md](docs/PRIVACY.md) for data flow and log details.
 ## Deeper reading
 
 - [WORKFLOW.md](docs/WORKFLOW.md): direct CLI use, worktrees, resume, and recovery.
+- [EVIDENCE.md](docs/EVIDENCE.md): model/effort observations, scope checks, acceptance, local ledgers, and measurement limits.
 - [SETTINGS.md](docs/SETTINGS.md): optional speed and reasoning choices, applied manually.
 - [OPTIMIZING.md](docs/OPTIMIZING.md): further savings; [TESTING.md](docs/TESTING.md): testing policy; [SKILL_AUDIT.md](docs/SKILL_AUDIT.md): skill overlap review.
 - [templates](templates/): task brief, handoff, project map, scorecard; [examples](examples/): editable worker prompts.
@@ -249,6 +267,6 @@ See [PRIVACY.md](docs/PRIVACY.md) for data flow and log details.
 
 ## Build a shareable archive
 
-From the package directory, run `python3 scripts/build_release.py`. It produces `dist/token-saver-0.2.0.zip` and prints its SHA-256 checksum. The explicit allowlist excludes credentials, private settings, logs, caches, and Git history. Prefer sharing that ZIP over an unreviewed working folder. Contributors can run the offline suite with `python3 -m unittest discover -s tests -v`; end users do not need to run it to install.
+From the package directory, run `python3 scripts/build_release.py`. It produces `dist/token-saver-0.3.0.zip` and prints its SHA-256 checksum. The explicit allowlist excludes credentials, private settings, logs, caches, and Git history. Prefer sharing that ZIP over an unreviewed working folder. Contributors can run the offline suite with `python3 -m unittest discover -s tests -v`; end users do not need to run it to install.
 
 Released under the [MIT license](LICENSE). Not affiliated with OpenAI, Meta, or TypeSafe. Provider CLIs and services are not bundled.

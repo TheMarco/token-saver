@@ -19,4 +19,6 @@ Muse logs can contain private source code and intermediate messages. The wrapper
 
 Install state lives at `<codex-home>/token-saver/state.json`, mode 600. It contains the original versions of replaced skill files and the generated global block so uninstall can restore ownership safely. Keep it private and retain it while the package is installed.
 
+Runs now also retain `handoff.json` and an offline session export for configuration/usage evidence. An optional ledger stores task IDs, counters, elapsed time, local handoff paths, and reviewer notes; it does not automatically include prompts or answers. Keep ledgers private and outside source control. No telemetry is uploaded by the ledger. Neither ledgers nor job logs are removed by uninstall. See [Evidence](EVIDENCE.md) for coverage and scope-check limitations.
+
 The release builder includes only the explicit source allowlist. It excludes environment files, key settings, auth state, backups, caches, session logs, test workspaces, and Git history. Review additional files before sharing a whole working folder; prefer the generated ZIP for a predictable distribution.

@@ -13,6 +13,8 @@ With the Astra/Muse profile enabled, Muse handles delegated work that would othe
 
 ## Muse directly
 
+See [Evidence](EVIDENCE.md) for optional model/effort overrides, allowed-path checking, locks, and acceptance/usage records. These preserve defaults and do not automatically accept work or run additional tests.
+
 These examples run from the extracted package. Installed helpers are under your Codex home's `skills` directory. Adapt the examples in `examples/` into a concrete task file before dispatching.
 
 ```sh
@@ -29,7 +31,8 @@ For code changes, inspect the current checkout and choose a task base before cre
 git -C /absolute/project worktree add -b codex/example-task /absolute/worker-directory HEAD
 python3 skills/muse-delegate/scripts/muse_worker.py \
   --mode edit --workspace /absolute/worker-directory \
-  --prompt-file /absolute/task.txt
+  --prompt-file /absolute/task.txt \
+  --allow-path src/example.py --allow-path tests/test_example.py
 ```
 
 `HEAD` is the current commit, not uncommitted work. Transfer only relevant changes deliberately when they are needed. The runner requires the worktree root; it refuses editing the main checkout. It does not integrate, commit, push, or delete worktrees for you. A worktree separates file changes but still shares repository metadata and the machine.
@@ -49,6 +52,8 @@ python3 skills/muse-delegate/scripts/muse_worker.py --extract /absolute/export.j
 On an error or timeout, inspect `reason`, `stderr_tail`, and the saved logs before retrying. A repeated expensive failure is a reason to work locally. Never disable sandboxing just to make an unattended job succeed.
 
 For corrections within the same assignment, continue its session rather than redoing discovery:
+
+Replace example allowed paths with the assignment's actual ownership. If recording usage, pass the same `--ledger` path on each follow-up; the ledger path is not inherited. Task ID and allowed paths are inherited, while model/effort overrides must be repeated when required.
 
 ```sh
 python3 skills/muse-delegate/scripts/muse_worker.py \

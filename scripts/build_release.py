@@ -16,6 +16,9 @@ FILES = [
     'examples/investigate.txt', 'examples/implement.txt',
     'skills/muse-delegate/SKILL.md', 'skills/muse-delegate/agents/openai.yaml',
     'skills/muse-delegate/scripts/muse_worker.py',
+    'skills/muse-delegate/scripts/muse_evidence.py',
+    'skills/muse-delegate/scripts/task_ledger.py',
+    'tests/test_evidence.py', 'tests/test_ledger.py', 'docs/EVIDENCE.md',
     'skills/jev-context/SKILL.md', 'skills/jev-context/agents/openai.yaml',
     'skills/jev-context/scripts/context_filter.py',
 ]

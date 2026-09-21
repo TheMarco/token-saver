@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run the installed Muse CLI and retain logs while emitting a compact result."""
 import argparse
-from contextlib import suppress
+from contextlib import suppress, ExitStack
 import json
 import os
 from pathlib import Path
@@ -10,7 +10,10 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
+from muse_evidence import job_lock, allowed_paths, snapshot, change_summary, configuration
+from task_ledger import append_event
 
 
 def parse_records(path):
@@ -42,6 +45,8 @@ def record_run_id(record):
     if not isinstance(payload, dict):
         return None
     stream = record.get("stream", {})
+    if payload.get("kind") == "run_model":
+        return payload.get("record", {}).get("run_stream", {}).get("id")
     return (payload.get("run_id") or payload.get("run_stream", {}).get("id") or
             (stream.get("id") if stream.get("kind") == "run" else None))
 
@@ -58,14 +63,21 @@ def latest_run_id(path):
 
 def extract(path, run_id=None):
     text, terminal, reason, model = "", None, None, None
+    effort, cli_version = None, None
+    usages, seen = [], set()
     for record in parse_records(path):
+        payload = record.get("payload", {})
+        if isinstance(payload, dict) and payload.get("kind") == "metadata":
+            cli_version = payload.get("record", {}).get("build", {}).get("semver") or cli_version
         if run_id is not None and record_run_id(record) != run_id:
             continue
         payload = record.get("payload", {})
         if not isinstance(payload, dict):
             continue
-        if record.get("payload_type") == "run.model.configured":
-            model = payload.get("record", payload).get("model_id") or model
+        if record.get("payload_type") == "run.model.configured" or payload.get("kind") == "run_model":
+            settings = payload.get("record", payload)
+            model = settings.get("model_id") or model
+            effort = settings.get("reasoning_effort") or effort
         if payload.get("kind") == "run_terminal":
             terminal, reason = payload.get("terminal"), payload.get("reason")
             if payload.get("text", "").strip():
@@ -74,12 +86,33 @@ def extract(path, run_id=None):
         event = payload.get("event", {})
         if payload.get("kind") != "run" or not isinstance(event, dict):
             continue
+        if event.get("kind") == "model_completed":
+            identity = payload.get("source_run_record_id") or record.get("id")
+            if identity is None or identity not in seen:
+                usages.append(event.get("usage") or {})
+                if identity is not None:
+                    seen.add(identity)
         if event.get("kind") == "assistant_message_committed" and event.get("text", "").strip():
             text = event["text"]
         elif event.get("kind") == "terminal":
             terminal = event.get("terminal")
             reason = event.get("reason")
-    return {"answer": text, "terminal": terminal, "reason": reason, "model": model}
+    def total(key):
+        values = [u.get(key) for u in usages]
+        return (sum(values) if values and all(type(v) is int and v >= 0 for v in values) else None)
+    # Raw provider input counters have provider-specific cache conventions. Only
+    # derive a total when every completion explicitly reports zero cache counters.
+    uncached = bool(usages) and all(all(type(u.get(k)) is int and u[k] == 0 for k in
+        ("cached_tokens", "cache_read_tokens", "cache_write_tokens")) for u in usages)
+    input_tokens, output_tokens = total("input_tokens"), total("output_tokens")
+    usage = {"input_tokens": input_tokens, "output_tokens": output_tokens,
+             "total_tokens": input_tokens + output_tokens if uncached and input_tokens is not None and output_tokens is not None else None,
+             "reasoning_tokens": total("reasoning_tokens"), "model_completions": len(usages),
+             "coverage": "reported_foreground_completions_only" if usages else "unavailable",
+             "includes_background_agents": False}
+    return {"answer": text, "terminal": terminal, "reason": reason, "model": model,
+            "reasoning_effort": effort, "cli_version": None,
+            "session_build_version": cli_version, "muse_usage": usage}
 
 
 def linked_worktree(workspace):
@@ -103,7 +136,7 @@ def compact(result, limit):
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
-def main():
+def run(locks):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path)
     parser.add_argument("--prompt-file", type=Path)
@@ -113,9 +146,18 @@ def main():
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--max-output-chars", type=int, default=8000)
     parser.add_argument("--extract", type=Path, help="Recover an existing JSONL log or Muse export offline")
+    parser.add_argument("--model", help="Per-turn model override; does not change defaults")
+    parser.add_argument("--reasoning-effort", choices=["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
+    parser.add_argument("--allow-path", action="append", help="Repeatable repository-relative file or directory ending in /; resumes inherit")
+    parser.add_argument("--task-id", help="Stable assignment ID for grouping follow-ups in a local ledger")
+    parser.add_argument("--ledger", type=Path, help="Optional local JSONL evidence ledger (no uploads)")
     args = parser.parse_args()
     if min(args.max_steps, args.timeout, args.max_output_chars) <= 0:
         parser.error("limits must be positive")
+    try:
+        args.allow_path = allowed_paths(args.allow_path)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.extract:
         if args.resume:
             parser.error("--extract is offline recovery; do not combine it with --resume")
@@ -159,9 +201,25 @@ def main():
         parser.error("prompt file is empty")
     run_dir = Path(tempfile.mkdtemp(prefix="codex-muse-"))
     session_id = prior["session_id"] if prior else str(uuid.uuid4())
+    try:
+        locks.enter_context(job_lock(workspace, session_id))
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    started = time.monotonic()
+    before = snapshot(workspace)
+    task_id = args.task_id or (prior or {}).get("task_id") or session_id
+    if prior and prior.get("task_id") and args.task_id and args.task_id != prior["task_id"]:
+        parser.error("resume cannot change task ID; start a new assignment")
+    scope = args.allow_path if args.allow_path is not None else (prior or {}).get("allowed_paths")
+    try:
+        scope = allowed_paths(scope)
+    except ValueError as exc:
+        parser.error(str(exc))
+    attempt_id = str(uuid.uuid4())
     session_file = run_dir / "session.json"
     session_file.write_text(json.dumps({"schema": 1, "session_id": session_id,
-                                       "workspace": str(workspace), "mode": args.mode}), encoding="utf-8")
+                                       "workspace": str(workspace), "mode": args.mode,
+                                       "task_id": task_id, "allowed_paths": scope}), encoding="utf-8")
     session_file.chmod(0o600)
     if prior:
         # Reusing an unknown ID can create a fresh session. Verify retained history
@@ -191,6 +249,8 @@ def main():
     contract += ("Read only. Use read_file/search tools; shell execution and file writes are disabled.\n"
                  if args.mode == "read" else
                  "Edit only the assigned files in this isolated worktree and run relevant checks.\n")
+    if scope is not None:
+        contract += "Allowed repository-relative paths: " + json.dumps(scope) + ". No other edits.\n"
     task_file = run_dir / "task.txt"
     task_file.write_text(contract + "\nAssignment:\n" + prompt + "\n", encoding="utf-8")
     command = [
@@ -202,31 +262,41 @@ def main():
     ]
     if args.mode == "read":
         command += ["--disable-write", "--disable-shell"]
+    if args.model is not None:
+        command += ["--model", args.model]
+    if args.reasoning_effort is not None:
+        command += ["--reasoning-effort", args.reasoning_effort]
     events_path, stderr_path = run_dir / "events.jsonl", run_dir / "stderr.log"
     print(f"Muse job {session_id}; logs: {run_dir}", file=sys.stderr, flush=True)
     interruption = None
     with events_path.open("w") as events, stderr_path.open("w") as errors:
-        process = subprocess.Popen(command, cwd=workspace, stdin=subprocess.DEVNULL,
-                                   stdout=events, stderr=errors, start_new_session=True)
         try:
-            code = process.wait(timeout=args.timeout)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
-            interruption = "timeout" if isinstance(exc, subprocess.TimeoutExpired) else "interrupted"
-            with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGTERM)
+            process = subprocess.Popen(command, cwd=workspace, stdin=subprocess.DEVNULL,
+                                       stdout=events, stderr=errors, start_new_session=True)
+        except OSError as exc:
+            errors.write(str(exc))
+            code, interruption = 127, "launch_failed"
+        else:
             try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
+                code = process.wait(timeout=args.timeout)
+            except (subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
+                interruption = "timeout" if isinstance(exc, subprocess.TimeoutExpired) else "interrupted"
                 with suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            code = 124 if interruption == "timeout" else 130
+                    os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    with suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                code = 124 if interruption == "timeout" else 130
     run_id = latest_run_id(events_path)
     result = extract(events_path, run_id=run_id)
     # Export is offline. Recover from CLI event format differences without another model call.
     # A resumed export includes older successful turns. Without this turn's ID,
     # never mistake an earlier answer for a successful follow-up.
-    if (not result["answer"] or not result["terminal"]) and (run_id or not prior):
+    # The offline durable export also contains usage absent from the live stream.
+    if run_id or not prior:
         export_path = run_dir / "export.json"
         with stderr_path.open("a") as errors:
             try:
@@ -235,23 +305,69 @@ def main():
                     cwd=workspace, stdout=errors, stderr=errors, timeout=20, check=False,
                 )
                 if exported.returncode == 0:
-                    result = extract(export_path, run_id=run_id)
-            except subprocess.TimeoutExpired:
+                    recovered = extract(export_path, run_id=run_id)
+                    for key, value in recovered.items():
+                        if value is not None and value != "" and (key != "muse_usage" or value["model_completions"]):
+                            result[key] = value
+            except (OSError, ValueError, subprocess.TimeoutExpired):
                 pass
     result_path = run_dir / "result.txt"
     result_path.write_text(result["answer"], encoding="utf-8")
     success = code == 0 and result["terminal"] == "completed" and bool(result["answer"])
     result.update({"status": "completed" if success else "failed", "exit_code": code,
+                   "execution_status": "completed" if success else "failed",
+                   "acceptance_status": "unreviewed", "checks": None,
+                   "task_id": task_id, "attempt_id": attempt_id,
                    "session_id": session_id, "workspace": str(workspace), "mode": args.mode,
                    "logs": str(run_dir), "result_file": str(result_path),
                    "resumed": prior is not None})
+    # Export metadata describes the session's original build, not necessarily the
+    # binary running a later resumed turn. Keep these measurements separate.
+    try:
+        version = subprocess.run([muse, "--version"], capture_output=True, text=True, timeout=10, check=False)
+        result["cli_version"] = version.stdout.strip() if version.returncode == 0 else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        result["cli_version"] = None
+    result["configuration"] = configuration({"model": args.model, "reasoning_effort": args.reasoning_effort}, result)
+    result["changes"] = change_summary(workspace, before, snapshot(workspace), scope, args.mode)
+    result["review_flags"] = []
+    if result["changes"]["scope_violations"]:
+        result["review_flags"].append("out_of_scope_changes")
+    if result["changes"].get("head_changed"):
+        result["review_flags"].append("unexpected_commit_or_checkout")
+    if not result["changes"]["scope_checked"]:
+        result["review_flags"].append("scope_not_verified")
+    if result["configuration"]["matches_requested"] is False:
+        result["review_flags"].append("configuration_mismatch")
     if interruption:
         result["reason"] = interruption
     if not success:
         result["stderr_tail"] = stderr_path.read_text(encoding="utf-8", errors="replace")[-4000:]
         result["reason"] = result["reason"] or "Missing successful completion; inspect retained logs."
+    handoff = run_dir / "handoff.json"
+    result["elapsed_seconds"] = round(time.monotonic() - started, 3)
+    result["handoff_file"] = str(handoff)
+    result["ledger_recorded"] = False
+    if args.ledger:
+        try:
+            append_event(args.ledger.expanduser().absolute(), {
+                "type": "execution", "task_id": task_id, "attempt_id": attempt_id,
+                "execution_status": result["execution_status"], "elapsed_seconds": result["elapsed_seconds"],
+                "muse_usage": result["muse_usage"], "handoff": str(handoff)})
+            result["ledger_recorded"] = True
+        except (OSError, ValueError) as exc:
+            result["ledger_error"] = str(exc)
+    handoff.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    handoff.chmod(0o600)
     compact(result, args.max_output_chars)
+    if result.get("ledger_error"):
+        return 1
     return 0 if success else (code if code > 0 else 1)
+
+
+def main():
+    with ExitStack() as locks:
+        return run(locks)
 
 
 if __name__ == "__main__":

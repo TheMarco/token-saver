@@ -24,6 +24,8 @@ _JEV_REL = Path("../skills/jev-context/scripts/context_filter.py")
 
 def _load(name, rel):
     path = (_HERE / rel).resolve()
+    if str(path.parent) not in sys.path:
+        sys.path.insert(0, str(path.parent))
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -270,7 +272,7 @@ class TestMuseResume(OfflineTestCase):
         self.prompt.write_text("Synthetic bounded follow-up")
         self.real_mkdtemp = tempfile.mkdtemp
 
-    def invoke(self, arguments, records, history=True, exported_records=()):
+    def invoke(self, arguments, records, history=True, exported_records=(), wait_error=None):
         def export(command, **kwargs):
             path = Path(command[command.index("--out") + 1])
             session = command[command.index("--session") + 1]
@@ -284,7 +286,10 @@ class TestMuseResume(OfflineTestCase):
             for record in records:
                 kwargs["stdout"].write(json.dumps(record) + "\n")
             process = mock.Mock()
-            process.wait.return_value = 0
+            if wait_error:
+                process.wait.side_effect = [wait_error, 0]
+            else:
+                process.wait.return_value = 0
             return process
 
         output = io.StringIO()
@@ -293,6 +298,7 @@ class TestMuseResume(OfflineTestCase):
               mock.patch.object(muse_worker.tempfile, "mkdtemp", side_effect=lambda **kw: self.real_mkdtemp(dir=self.root, **kw)),
               mock.patch.object(muse_worker.subprocess, "run", side_effect=export),
               mock.patch.object(muse_worker.subprocess, "Popen", side_effect=launch) as popen,
+              mock.patch.object(muse_worker.os, "killpg"),
               contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO())):
             try:
                 code = muse_worker.main()
@@ -320,6 +326,37 @@ class TestMuseResume(OfflineTestCase):
         self.assertIn("--disable-write", command)
         self.assertIn("--disable-shell", command)
         self.assertEqual((Path(first["logs"]) / "events.jsonl").read_bytes(), original)
+
+    def test_overrides_handoff_and_ledger_separate_acceptance(self):
+        ledger = self.root / "task.ledger.jsonl"
+        code, result, calls = self.invoke(["--workspace", str(self.root), "--task-id", "example",
+            "--model", "m-1", "--reasoning-effort", "max", "--allow-path", "src/", "--ledger", str(ledger)],
+            _muse_records())
+        self.assertEqual(code, 0)
+        command = calls[0].args[0]
+        self.assertEqual(command[command.index("--reasoning-effort") + 1], "max")
+        self.assertEqual(command[command.index("--model") + 1], "m-1")
+        self.assertEqual(result["execution_status"], "completed")
+        self.assertEqual(result["acceptance_status"], "unreviewed")
+        self.assertIsNone(result["configuration"]["matches_requested"])
+        self.assertIsNone(result["configuration"]["observed"]["reasoning_effort"])
+        self.assertTrue(result["ledger_recorded"])
+        self.assertEqual(json.loads(Path(result["handoff_file"]).read_text())["attempt_id"], result["attempt_id"])
+        code, second, calls = self.invoke(["--resume", result["logs"]], _muse_records())
+        self.assertEqual(second["task_id"], "example")
+        self.assertEqual(second["changes"]["allowed_paths"], ["src/"])
+        self.assertNotIn("--model", calls[0].args[0])
+        self.assertNotIn("--reasoning-effort", calls[0].args[0])
+
+    def test_timeout_records_failed_execution_not_old_completion(self):
+        code, result, _ = self.invoke(["--workspace", str(self.root)], _muse_records(),
+                                      wait_error=subprocess.TimeoutExpired("muse", 1))
+        self.assertEqual(code, 124)
+        self.assertEqual(result["execution_status"], "failed")
+        self.assertEqual(result["reason"], "timeout")
+        self.assertEqual(result["acceptance_status"], "unreviewed")
+        # Lock must have released after the failed attempt.
+        self.assertEqual(self.first_job()["execution_status"], "completed")
 
     def test_resume_rejects_workspace_mode_and_missing_metadata_before_launch(self):
         first = self.first_job()
