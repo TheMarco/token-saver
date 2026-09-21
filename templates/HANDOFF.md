@@ -1,6 +1,6 @@
 # Task handoff
 
-Keep this around 300 words or less. Link to sources and logs; do not paste the transcript. Save filled copies under `work/` or another private location.
+Use only applicable fields, around 150 words or less. Link to sources and logs; do not paste the transcript. Save filled copies under `work/` or another private location. This template is optional, not mandatory bookkeeping.
 
 - **Goal and observable done condition:**
 - **Workspace, branch/commit, and relevant uncommitted changes:**

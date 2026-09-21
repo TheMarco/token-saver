@@ -7,6 +7,10 @@ Use Muse as an external worker. The primary Codex agent owns scope, judgment, in
 
 ## Dispatch
 
+Delegate only when Muse can own a complete, bounded result whose review should cost less than doing it locally. If supervising requires reconstructing the entire investigation, keep it local. Status/usage/explanation questions use existing evidence: answer and stop, without starting tests, fixes, or audits. This is a task-boundary criterion, not a judgment about model capability.
+
+Name the initial relevant check and when it may expand: a specific failure, affected dependency, risk, or required gate. Do not default to a full suite.
+
 Create a short prompt file with the assignment, relevant paths, acceptance criteria, checks, and exclusions. Include only necessary context. For discovery, provide candidate paths when known and request source locations. For edits, assign exact file ownership. Use `apply_patch` to write prompts; do not interpolate them into shell commands. Resolve the helper relative to this skill directory; the examples below assume the default Codex home. With a custom `CODEX_HOME`, use its `skills/muse-delegate/scripts/muse_worker.py` instead.
 
 Read-only investigation (shell and direct file writes disabled):
@@ -27,6 +31,8 @@ The runner uses the existing Muse login/model, permits 24 model steps, and times
 
 ## Accept results
 
+Default handoff: at most 150 words covering changes/findings, check results, unresolved issues, and references. The wrapper caps the entire stdout result at 3,000 characters by default; `--max-output-chars` can override it. Full evidence remains on disk. Read additional evidence only for a concrete question, not as a routine transcript review.
+
 Optional `--model` and `--reasoning-effort` override a turn without changing defaults. Repeat on resume if required. Inspect `configuration.requested`, `observed`, and `matches`; unknown observations stay null. CLI version is separate from model identity. Never infer effective effort from a requested flag.
 
 For edit jobs, pass repeated `--allow-path` values matching owned files (or directories ending in `/`). The handoff records revisions, pre-existing and changed/untracked paths, and scope violations. Omitted scope is unverified. Snapshots do not audit ignored files, restored intermediate edits, or external effects. Workspace/session locks prevent overlapping wrapper jobs, not external tools.
@@ -43,6 +49,6 @@ python3 ~/.codex/skills/muse-delegate/scripts/muse_worker.py --resume /absolute/
 
 Resume submits another model turn with the same session ID; it is not free output recovery. Include only the correction/new evidence and any narrower file ownership. The helper inherits and locks the original workspace and read/edit mode, rechecks edit worktree isolation, and saves this turn in a new log directory. It requires `session.json` produced by this runner; older jobs must start fresh or use Muse's interactive resume. Retain the original worktree and Muse session logs. Never fabricate metadata, resume unrelated work, or run concurrent turns on the same session. Existing context is useful, not proof the files are unchanged: inspect relevant diffs since the prior turn. If a resume fails, inspect it before starting a fresh job; do not silently restart and repeat work. After two unsuccessful fixes to the same issue, reassess the evidence and approach before another attempt.
 
-Read the compact result and any reported errors. Open full `result.txt` when output was truncated. Treat findings as unverified until checked against source; inspect changed files, new/untracked files, and Git diff before integration. Run the checks relevant to the change. Integrate only the approved task scope; retain the worktree until accepted. Do not let Muse commit or push on the user's behalf.
+Read the compact result and reported errors. Open `handoff_file` or `result.txt` when needed to resolve omitted information. Inspect relevant source and tracked/untracked diffs before integration without repeating discovery. Reuse trustworthy check results for the same code state; rerun or expand only for changed inputs, a concrete uncertainty/risk, failure, or required gate. Integrate only approved scope and retain the worktree until accepted. Do not let Muse commit or push.
 
 Avoid loading raw event streams into Codex. They include reasoning and repeated intermediate messages. If Muse is unavailable, try one targeted fix when justified, then have the primary agent handle necessary work and report the fallback. Under the Astra/Muse policy, do not automatically route to Sol, Terra, Luna, explorer, or mechanical workers. Do not run multiple agents on the same subtask or use delegation for a trivial read.

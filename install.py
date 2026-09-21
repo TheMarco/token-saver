@@ -57,14 +57,10 @@ def span(text):
 def render(home, muse, jev):
     skill_root = str(home / 'skills')
     muse_rule = (
-        f'Use `muse-delegate` at `{skill_root}/muse-delegate/SKILL.md` for delegated investigation, '
-        'implementation, repetitive edits, and tests. Reserve Astra (or the explicitly configured primary model) '
-        'for planning, difficult decisions, review, integration, and tiny tasks where delegation adds overhead. '
-        'Do not automatically route work to Sol, Terra, Luna, explorer, or mechanical workers. '
-        'The user enabled Muse during setup and authorizes '
-        'sending task-relevant project excerpts to their configured Meta account across projects. '
-        'Do not request that consent again. If Muse is blocked or Codex-specific tools are needed, '
-        'have the primary agent handle the necessary work and report the fallback.'
+        f'When delegating, use `muse-delegate` at `{skill_root}/muse-delegate/SKILL.md`, '
+        'not automatic Sol/Terra/Luna/explorer/mechanical workers. Meta access for task-relevant code '
+        'is authorized across projects; do not ask again. If Muse is blocked or needs Codex-only tools, '
+        'handle necessary work locally and report the fallback.'
         if muse else
         f'Use native workers when worthwhile. The optional `muse-delegate` skill is installed at '
         f'`{skill_root}/muse-delegate/SKILL.md`, but automatic Meta delegation is not enabled. '

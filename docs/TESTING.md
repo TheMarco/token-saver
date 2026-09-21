@@ -2,6 +2,8 @@
 
 Tests should buy confidence against a concrete failure, not increase a count. Preserve user/project-required checks.
 
+Status, usage, and explanation requests inspect existing evidence and stop after answering; they do not initiate verification or fixes. Observing an already-running suite is different from launching one. Before implementation, name the initial focused check. State the specific failure, affected dependency, risk, or required gate before expanding it. Do not repeat a worker's valid check merely because a different agent ran it.
+
 - **Reuse existing coverage.** Add a test when it reproduces a bug, covers meaningful new behavior, or protects a costly failure such as data loss or a permission boundary.
 - **Avoid low-value tests.** Overlapping permutations, source-text assertions, tests that mirror the implementation, and elaborate mocks can create maintenance cost or false confidence.
 - **Use the right evidence.** Copy/documentation changes usually need targeted inspection. A rendered UI needs visual inspection; the existence of a screenshot does not prove correctness.

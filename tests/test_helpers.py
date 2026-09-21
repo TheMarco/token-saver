@@ -105,6 +105,20 @@ class OfflineTestCase(unittest.TestCase):
 
 
 class TestMuseWorkerExtract(OfflineTestCase):
+    def test_default_display_budget_preserves_full_answer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            _write_live_jsonl(path, _muse_records(answer="x" * 10000))
+            result = subprocess.run([sys.executable, str((_HERE / _MUSE_REL).resolve()),
+                "--extract", str(path)], capture_output=True, text=True,
+                env={**os.environ, "TMPDIR": tmp}, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertLessEqual(len(result.stdout), 3000)
+            shown = json.loads(result.stdout)
+            self.assertTrue(shown["output_truncated"])
+            full = json.loads(Path(shown["handoff_file"]).read_text())
+            self.assertEqual(full["answer"], "x" * 10000)
+
     def test_live_jsonl_extraction(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "events.jsonl"

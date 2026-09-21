@@ -6,7 +6,7 @@ Use for substantial or uncertain work. A tiny change can use a sentence.
 - **Scope:** Which files may change? What is outside this task?
 - **Owner:** Primary decision/review owner and delegated worker, if useful.
 - **Starting evidence:** Relevant sources, findings, current code state, and checks already performed.
-- **Verification:** The cheapest meaningful existing check. Add a test only for a concrete gap. Preserve user/project-required checks.
+- **Verification budget:** Name the smallest relevant existing check and the failure, affected dependency, risk, or required gate that would justify expanding. Add tests only for concrete gaps; preserve required checks.
 - **Representative case:** For uncertain visual/structural work, validate one case in the actual environment before expanding.
 - **Reassessment:** What evidence invalidates this approach? Reassess assumptions when repeated attempts fail.
 - **Return:** Concise changes/findings, paths, checks, failures, and remaining uncertainty.

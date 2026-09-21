@@ -203,7 +203,7 @@ def run(locks, termination):
     parser.add_argument("--resume", type=Path, help="Prior job directory with session.json; same workspace and mode only")
     parser.add_argument("--max-steps", type=int, default=24)
     parser.add_argument("--timeout", type=int, default=600)
-    parser.add_argument("--max-output-chars", type=int, default=8000, help="Entire stdout JSON budget, including newline (minimum 3); full evidence stays on disk")
+    parser.add_argument("--max-output-chars", type=int, default=3000, help="Entire stdout JSON budget, including newline (default 3000, minimum 3); full evidence stays on disk")
     parser.add_argument("--extract", type=Path, help="Recover an existing JSONL log or Muse export offline")
     parser.add_argument("--model", help="Per-turn model override; does not change defaults")
     parser.add_argument("--reasoning-effort", choices=["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
@@ -305,7 +305,9 @@ def run(locks, termination):
         "send messages, change authentication/settings, or access unrelated secrets. "
         "You share the machine with other workers; preserve their changes and stay within assigned ownership. "
         "Report findings or changes, source paths/lines, checks and failures, and unresolved questions "
-        "in at most 500 words. If blocked, stop and report the exact blocker.\n"
+        "in at most 150 words, with references to details instead of transcripts. "
+        "Start with the assigned focused check; expand only for a concrete failure, affected dependency, "
+        "risk, or required gate, and explain why. If blocked, stop and report the exact blocker.\n"
     )
     contract += ("Read only. Use read_file/search tools; shell execution and file writes are disabled.\n"
                  if args.mode == "read" else

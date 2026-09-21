@@ -4,9 +4,9 @@ The editable global policy is [instructions/global.md](../instructions/global.md
 
 ## Choose the smallest useful approach
 
-1. A focused question or a small change: use `rg` and bounded source reads directly.
+1. A focused question or a small change: use `rg` and bounded source reads directly. For informational requests, inspect existing evidence, answer, and stop; do not start tests or fixes unless requested.
 2. Many candidate files or a large saved log: use Jev Context to select traceable excerpts, then read relevant originals before making decisions.
-3. A bounded, independent task with clear acceptance criteria: delegate to Muse when enabled, keeping the prompt small. Do useful independent work while it runs.
+3. A bounded, independent task with clear acceptance criteria: delegate to Muse when enabled only if it replaces primary work and can be reviewed without reconstructing the investigation. Specify the initial check and reasons that permit expanding it. Do useful independent work while it runs.
 4. Architecture, ambiguous debugging, security decisions, migrations, and integration: keep ownership with the primary Codex agent.
 
 With the Astra/Muse profile enabled, Muse handles delegated work that would otherwise go to Sol/Terra/Luna workers. Do not automatically fall back to those models. If Muse is unavailable or a step needs Codex-specific tools, the primary agent handles the necessary work and reports the fallback. Tiny tasks stay local. Avoid multiple agents repeating the same task. Permit at most three workers and no recursive delegation. Revisit model routing when the user changes the preference rather than guessing future model capabilities.
